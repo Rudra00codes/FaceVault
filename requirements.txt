@@ -6,3 +6,5 @@ deepface>=0.0.93
 faiss-cpu>=1.8.0        # use faiss-gpu if CUDA is available
 numpy>=1.24.0
 opencv-python-headless>=4.9.0.80
+scikit-learn>=1.3.0     # used internally by DeepFace for clustering metrics
+tf-keras>=2.16.0        # Keras backend required by ArcFace model weights

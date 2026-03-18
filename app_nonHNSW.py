@@ -7,7 +7,7 @@ import cv2
 import os
 import tempfile
 
-from config import DATA_FILE, INDEX_FILE, IMAGES_DIR, APP_TITLE, PAGE_ICON, THUMBNAIL_COLUMNS
+from config import DATA_FILE, INDEX_FILE, FLAT_INDEX_FILE, IMAGES_DIR, APP_TITLE, PAGE_ICON, THUMBNAIL_COLUMNS
 
 # --- 1. Setup & Configuration ---
 st.set_page_config(page_title=f"{APP_TITLE} (Flat Index)", page_icon=PAGE_ICON, layout="wide")
@@ -20,7 +20,10 @@ def load_data():
     # 1. Load the raw data
     with open(DATA_FILE, 'rb') as f:
         data = pickle.load(f)
-    index = faiss.read_index(INDEX_FILE)
+
+    # Prefer the dedicated flat index; fall back to the HNSW index file.
+    idx_path = FLAT_INDEX_FILE if os.path.exists(FLAT_INDEX_FILE) else INDEX_FILE
+    index = faiss.read_index(idx_path)
     
     # 2. FIX PATHS for Local Machine
     # The saved paths point to /content/lfw_extracted/... (Colab).

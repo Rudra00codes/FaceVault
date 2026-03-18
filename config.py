@@ -13,6 +13,11 @@ without touching the main application code.
 # Acceptable range: 0.0 – 2.0  (typical safe values: 0.40 – 0.65)
 MATCH_THRESHOLD: float = 0.50
 
+# Deduplication threshold — if the nearest-neighbour score exceeds this value
+# when adding a new face, warn the user that it may be a duplicate.
+# Should be ≥ MATCH_THRESHOLD.  Set to 2.0 to effectively disable dedup warnings.
+DEDUP_THRESHOLD: float = 0.85
+
 # ── FAISS HNSW index parameters ───────────────────────────────────────────────
 # M      : number of bi-directional links per node (higher → better recall, more RAM)
 # efSearch: beam width at query time (higher → better recall, slower)
@@ -24,7 +29,8 @@ EMBEDDING_DIM: int = 512
 
 # ── File paths ────────────────────────────────────────────────────────────────
 DATA_FILE: str = "app_data.pkl"
-INDEX_FILE: str = "vector_index.bin"
+INDEX_FILE: str = "vector_index.bin"           # HNSW index (used by app.py)
+FLAT_INDEX_FILE: str = "vector_index_flat.bin"  # Flat index (used by app_nonHNSW.py)
 IMAGES_DIR: str = "images"
 
 # ── UI ────────────────────────────────────────────────────────────────────────

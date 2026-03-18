@@ -10,6 +10,7 @@ import time
 
 from config import (
     MATCH_THRESHOLD,
+    DEDUP_THRESHOLD,
     DATA_FILE,
     INDEX_FILE,
     IMAGES_DIR,
@@ -103,12 +104,24 @@ def add_new_face(img_array, embedding, person_name, cluster_id, clusters, paths,
     return save_path
 
 # --- 3. LOAD STATE ---
+# Always reload from disk so changes from other sessions are reflected
+# on each Streamlit re-run — avoids stale in-memory data.
 try:
     clusters, image_paths, index = load_data()
-    if 'clusters' not in st.session_state:
-        st.session_state['clusters'] = clusters
-        st.session_state['paths'] = image_paths
-        st.session_state['index'] = index
+
+    # ── Fix 3: Integrity check ──────────────────────────────────────────
+    # HNSW indices don't support deletion. If a crash interrupted a write,
+    # len(paths) and index.ntotal can go out of sync.  Warn the user early.
+    if index is not None and len(image_paths) != index.ntotal:
+        st.warning(
+            f"⚠️ Data integrity mismatch: {len(image_paths)} paths vs "
+            f"{index.ntotal} vectors in the FAISS index. "
+            "Results may be unreliable — consider rebuilding the index."
+        )
+
+    st.session_state['clusters'] = clusters
+    st.session_state['paths'] = image_paths
+    st.session_state['index'] = index
 except Exception as e:
     st.error(f"Critical Error: {e}")
     st.stop()
@@ -228,7 +241,8 @@ with tab2:
             # Identify closest match
             existing_name = "Unknown"
             matched_cluster_id = None
-            
+            match_path = None           # ← Fix 2: initialise before conditional
+
             if idx < len(paths_list):
                 match_path = paths_list[idx]
                 existing_name = os.path.basename(os.path.dirname(match_path)).replace("_", " ")
@@ -236,21 +250,28 @@ with tab2:
                     if match_path in p_list:
                         matched_cluster_id = c_id
                         break
-            
+
             # OPTION 1
             st.subheader("Option 1: Add to Existing Person")
             if score > MATCH_THRESHOLD:
                 st.success(f"Closest Match: **{existing_name}** (Similarity: {score:.2f})")
             else:
                 st.warning(f"Closest Match: **{existing_name}** (Low Similarity: {score:.2f})")
-            
+
             col_opt1_a, col_opt1_b = st.columns([1, 4])
             with col_opt1_a:
-                if idx < len(paths_list) and os.path.exists(match_path):
+                if match_path and os.path.exists(match_path):   # ← Fix 2: safe guard
                      st.image(match_path, caption="Database Match", width=100)
             with col_opt1_b:
                 st.write(f"Do you want to add this to **{existing_name}**?")
                 if st.button(f"➕ Add to '{existing_name}'"):
+                    # ── Fix 5: dedup check ───────────────────────────────────
+                    if score > DEDUP_THRESHOLD:
+                        st.warning(
+                            f"⚠️ This face is very similar to an existing entry "
+                            f"(score {score:.2f} > dedup threshold {DEDUP_THRESHOLD}). "
+                            "It may already be in the database."
+                        )
                     add_new_face(
                         st.session_state['current_img'],
                         st.session_state['current_embedding'],
