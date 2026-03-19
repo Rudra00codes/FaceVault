@@ -37,3 +37,12 @@ IMAGES_DIR: str = "images"
 APP_TITLE: str = "FaceVault"
 PAGE_ICON: str = "🔐"
 THUMBNAIL_COLUMNS: int = 5          # number of image columns in the gallery view
+
+# ── Federated Sync ────────────────────────────────────────────────────────────
+CENTROID_EMA_ALPHA: float = 0.3          # EMA smoothing for centroid updates
+CENTROID_MERGE_THRESHOLD: float = 0.80   # merge fragmented local clusters before export
+DP_EPSILON: float = 1.0                  # differential privacy budget (lower = more private)
+SYNC_MATCH_THRESHOLD: float = 0.70       # cosine sim threshold for cross-device merge suggestion
+SYNC_SERVER_HOST: str = "127.0.0.1"
+SYNC_SERVER_PORT: int = 5050
+MANIFEST_FILE: str = "sync_manifest.enc"  # exported manifest filename

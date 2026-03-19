@@ -7,6 +7,8 @@ import cv2
 import os
 import tempfile
 import time
+import requests
+import json
 
 from config import (
     MATCH_THRESHOLD,
@@ -17,7 +19,14 @@ from config import (
     APP_TITLE,
     PAGE_ICON,
     THUMBNAIL_COLUMNS,
+    DP_EPSILON,
+    SYNC_SERVER_HOST,
+    SYNC_SERVER_PORT,
+    CENTROID_EMA_ALPHA,
 )
+from centroid import compute_centroids, compute_centroids_ema, merge_fragmented_clusters
+from privacy import generate_sync_manifest, manifest_to_json, manifest_from_json
+from merge import preview_merges, apply_merge_suggestions, save_merged_state
 
 # --- 1. CONFIGURATION ---
 st.set_page_config(page_title=APP_TITLE, page_icon=PAGE_ICON, layout="wide")
@@ -127,7 +136,7 @@ except Exception as e:
     st.stop()
 
 # --- 4. TABS INTERFACE ---
-tab1, tab2 = st.tabs(["🔍 Database Explorer", "➕ Add / Search Face"])
+tab1, tab2, tab3 = st.tabs(["🔍 Database Explorer", "➕ Add / Search Face", "🔄 Federated Sync"])
 
 # === TAB 1: EXPLORER (With Search) ===
 with tab1:
@@ -319,3 +328,138 @@ with tab2:
                         st.rerun()
                     else:
                         st.error("Enter a name.")
+
+# === TAB 3: FEDERATED SYNC ===
+with tab3:
+    st.subheader("Privacy-Preserving Cluster Sync")
+    st.caption(
+        "Exchange encrypted identity centroids with another device — "
+        "no images ever leave your machine."
+    )
+
+    SYNC_URL = f"http://{SYNC_SERVER_HOST}:{SYNC_SERVER_PORT}"
+    DEVICE_ID = st.text_input(
+        "Device ID", value=f"device_{os.getpid()}",
+        help="Unique identifier for this device. Use different IDs for the two-device demo."
+    )
+
+    curr = st.session_state['clusters']
+    curr_paths = st.session_state['paths']
+    curr_index = st.session_state['index']
+
+    # ── Step 1: Centroid summary ──────────────────────────────────────────
+    st.markdown("---")
+    st.markdown("#### 1 · Centroid Summary")
+
+    if curr_index is not None and curr:
+        centroids = compute_centroids(curr, curr_paths, curr_index)
+        cluster_sizes = {k: len(v) for k, v in curr.items() if k != -1}
+
+        summary_data = []
+        for c_id in sorted(centroids.keys()):
+            label = os.path.basename(os.path.dirname(curr[c_id][0])).replace("_", " ") if curr.get(c_id) else "?"
+            summary_data.append({
+                "Cluster ID": c_id,
+                "Label": label,
+                "Images": cluster_sizes.get(c_id, 0),
+                "Centroid Norm": f"{np.linalg.norm(centroids[c_id]):.4f}",
+            })
+        st.dataframe(summary_data, use_container_width=True)
+        st.caption(f"{len(centroids)} clusters ready for sync.")
+    else:
+        st.info("Database is empty — nothing to sync.")
+        centroids = {}
+        cluster_sizes = {}
+
+    # ── Step 2: Export & Submit manifest ───────────────────────────────────
+    st.markdown("---")
+    st.markdown("#### 2 · Export & Submit")
+
+    col_eps, col_btn = st.columns([1, 2])
+    with col_eps:
+        epsilon = st.number_input(
+            "Privacy budget (ε)", min_value=0.01, max_value=50.0,
+            value=DP_EPSILON, step=0.1,
+            help="Lower = more private but noisier centroids."
+        )
+
+    with col_btn:
+        st.write("##")
+        if st.button("🚀 Export & Submit to Relay Server", disabled=not centroids):
+            with st.spinner("Generating manifest …"):
+                manifest = generate_sync_manifest(
+                    device_id=DEVICE_ID,
+                    centroids=centroids,
+                    cluster_sizes=cluster_sizes,
+                    epsilon=epsilon,
+                )
+                st.session_state['last_manifest'] = manifest
+
+            # Submit to relay
+            try:
+                resp = requests.post(
+                    f"{SYNC_URL}/submit_manifest",
+                    data=manifest_to_json(manifest),
+                    headers={"Content-Type": "application/json"},
+                    timeout=5,
+                )
+                resp_data = resp.json()
+                if resp.status_code == 200:
+                    st.success(
+                        f"✅ Submitted {resp_data.get('clusters_received', '?')} centroids. "
+                        f"Devices registered: {resp_data.get('devices_registered', '?')}"
+                    )
+                else:
+                    st.error(f"Server error: {resp_data.get('message', resp.text)}")
+            except requests.ConnectionError:
+                st.error(
+                    f"Cannot reach sync server at {SYNC_URL}. "
+                    "Start it with: `python sync_server.py`"
+                )
+
+    # ── Step 3: Merge suggestions ─────────────────────────────────────────
+    st.markdown("---")
+    st.markdown("#### 3 · Merge Suggestions")
+
+    col_compare, col_fetch = st.columns(2)
+    with col_compare:
+        if st.button("🔀 Run Cross-Device Comparison"):
+            try:
+                resp = requests.get(f"{SYNC_URL}/compare", timeout=5)
+                data = resp.json()
+                st.info(f"Comparison complete — {data.get('total_matches', 0)} matches found.")
+            except requests.ConnectionError:
+                st.error("Sync server not reachable.")
+
+    with col_fetch:
+        if st.button("📥 Fetch My Suggestions"):
+            try:
+                resp = requests.get(
+                    f"{SYNC_URL}/merge_suggestions/{DEVICE_ID}", timeout=5
+                )
+                suggestions = resp.json().get("suggestions", [])
+                st.session_state['sync_suggestions'] = suggestions
+                if suggestions:
+                    st.success(f"Received {len(suggestions)} merge suggestions.")
+                else:
+                    st.info("No suggestions yet — ensure both devices have submitted.")
+            except requests.ConnectionError:
+                st.error("Sync server not reachable.")
+
+    if 'sync_suggestions' in st.session_state and st.session_state['sync_suggestions']:
+        previews = preview_merges(
+            st.session_state['sync_suggestions'], curr, DEVICE_ID
+        )
+        st.markdown("**Proposed merges:**")
+        st.dataframe(previews, use_container_width=True)
+
+        if st.button("✅ Apply Merges"):
+            updated_clusters, updated_paths, count = apply_merge_suggestions(
+                st.session_state['sync_suggestions'],
+                curr, curr_paths, DEVICE_ID,
+            )
+            save_merged_state(updated_clusters, updated_paths)
+            st.success(f"Applied {count} merges. Reloading…")
+            del st.session_state['sync_suggestions']
+            time.sleep(1)
+            st.rerun()
