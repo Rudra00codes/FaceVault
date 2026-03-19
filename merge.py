@@ -116,17 +116,35 @@ def apply_merge_suggestions(
             merge_count += 1
             continue
 
-        # Rename the image folder
+        # Rename the image folder (with backup for rollback safety)
         old_dir = os.path.join(base_dir, current_label.replace(" ", "_"))
         new_dir = os.path.join(base_dir, target_label.replace(" ", "_"))
+        backup_dir = old_dir + "_backup"
 
-        if os.path.exists(old_dir) and not os.path.exists(new_dir):
-            os.rename(old_dir, new_dir)
-        elif os.path.exists(old_dir) and os.path.exists(new_dir):
-            # Both folders exist — move contents into target
-            for fname in os.listdir(old_dir):
-                shutil.move(os.path.join(old_dir, fname), new_dir)
-            os.rmdir(old_dir)
+        try:
+            # Create a backup before any destructive operation
+            if os.path.exists(old_dir):
+                shutil.copytree(old_dir, backup_dir)
+
+            if os.path.exists(old_dir) and not os.path.exists(new_dir):
+                os.rename(old_dir, new_dir)
+            elif os.path.exists(old_dir) and os.path.exists(new_dir):
+                # Both folders exist — move contents into target
+                for fname in os.listdir(old_dir):
+                    shutil.move(os.path.join(old_dir, fname), new_dir)
+                os.rmdir(old_dir)
+
+            # Remove backup on success
+            if os.path.exists(backup_dir):
+                shutil.rmtree(backup_dir)
+
+        except Exception:
+            # Rollback: restore from backup if the rename/move failed
+            if os.path.exists(backup_dir):
+                if os.path.exists(old_dir):
+                    shutil.rmtree(old_dir)
+                os.rename(backup_dir, old_dir)
+            raise  # re-raise so the caller knows it failed
 
         # Update paths in cluster
         updated = []

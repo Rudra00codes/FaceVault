@@ -105,13 +105,31 @@ def compute_centroids_ema(
 def merge_fragmented_clusters(
     centroids: Dict[int, np.ndarray],
     threshold: float = CENTROID_MERGE_THRESHOLD,
+    cluster_sizes: Optional[Dict[int, int]] = None,
+    min_cluster_size: int = 3,
 ) -> Tuple[Dict[int, np.ndarray], Dict[int, int]]:
     """Merge local clusters whose centroids are suspiciously close.
+
+    Parameters
+    ----------
+    centroids        : {cluster_id: centroid_vector}
+    threshold        : cosine-similarity above which clusters are merged
+    cluster_sizes    : {cluster_id: n_images} — used for the min-size guard
+    min_cluster_size : clusters smaller than this are excluded from merging
+                       to avoid collapsing genuinely different people
+                       (e.g. twins, look-alikes with few photos).
 
     Returns
     -------
     merged_centroids : dict — new centroid map after merging
     merge_map        : dict — {absorbed_id: surviving_id} for bookkeeping
+
+    Known edge case
+    ---------------
+    Twins or look-alikes with similar embeddings *and* enough photos to
+    exceed `min_cluster_size` will still be merged incorrectly. This is
+    acknowledged as a limitation — a human-review step before export is
+    recommended for high-stakes deployments.
     """
     ids = sorted(centroids.keys())
     if len(ids) < 2:
@@ -136,10 +154,16 @@ def merge_fragmented_clusters(
         if ra != rb:
             parent[rb] = ra
 
+    # Only consider clusters that meet the minimum size requirement
+    if cluster_sizes is not None:
+        eligible = {cid for cid in ids if cluster_sizes.get(cid, 0) >= min_cluster_size}
+    else:
+        eligible = set(ids)  # if sizes unknown, allow all
+
     for i_pos, id_a in enumerate(ids):
         for j_pos in range(i_pos + 1, len(ids)):
             id_b = ids[j_pos]
-            if sim[i_pos, j_pos] >= threshold:
+            if id_a in eligible and id_b in eligible and sim[i_pos, j_pos] >= threshold:
                 union(id_a, id_b)
 
     # Group clusters by their root

@@ -58,10 +58,12 @@ class TestCompare:
 
     def test_matching_centroids_found(self, client):
         # Both devices share the SAME centroid for cluster 0 → should match
+        # Use extremely high ε and large cluster_size to make DP noise negligible
         shared = _random_centroid()
         for dev_id in ("dev_A", "dev_B"):
             centroids = {0: shared.copy()}
-            m = generate_sync_manifest(dev_id, centroids, epsilon=100.0)  # high ε = low noise
+            sizes = {0: 100}  # large cluster → lower sensitivity
+            m = generate_sync_manifest(dev_id, centroids, cluster_sizes=sizes, epsilon=1000.0)
             client.post("/submit_manifest", data=manifest_to_json(m), content_type="application/json")
 
         resp = client.get("/compare")
@@ -96,7 +98,8 @@ class TestMergeSuggestions:
     def test_suggestions_after_compare(self, client):
         shared = _random_centroid()
         for dev_id in ("dev_A", "dev_B"):
-            m = generate_sync_manifest(dev_id, {0: shared.copy()}, epsilon=100.0)
+            sizes = {0: 100}
+            m = generate_sync_manifest(dev_id, {0: shared.copy()}, cluster_sizes=sizes, epsilon=1000.0)
             client.post("/submit_manifest", data=manifest_to_json(m), content_type="application/json")
         client.get("/compare")
 

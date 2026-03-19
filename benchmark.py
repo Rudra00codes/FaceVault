@@ -95,7 +95,14 @@ def _split_dataset(
     def subset(ids):
         sub_clusters = {k: v for k, v in clusters.items() if k in ids}
         sub_paths = [p for cid in ids for p in clusters[cid]]
-        # Build a sub-index
+        # Build a sub-index from the parent index.
+        # NOTE: index.reconstruct() is used here to extract vectors.  This
+        # works for IndexFlatIP (used in synthetic benchmarks) but will FAIL
+        # on IndexHNSWFlat unless it was built with store_pairs=True.
+        # If adapting this benchmark to run against a real HNSW database,
+        # either (a) store the raw embeddings separately in app_data.pkl, or
+        # (b) create the HNSW index with: idx = faiss.IndexHNSWFlat(dim, M);
+        #     idx.hnsw.store_pairs = True.
         sub_index = faiss.IndexFlatIP(EMBEDDING_DIM)
         path_to_idx = {p: i for i, p in enumerate(paths)}
         for p in sub_paths:

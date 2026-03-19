@@ -337,6 +337,21 @@ with tab3:
         "no images ever leave your machine."
     )
 
+    # ── Fix 1: Visible privacy disclaimer ─────────────────────────────────
+    with st.expander("⚠️ Privacy & Security Notice", expanded=False):
+        st.markdown(
+            "**Semi-honest relay model.** In this demo the encryption key is "
+            "sent alongside the ciphertext so that the relay server can decrypt "
+            "centroids for cosine comparison. The server is trusted *not to leak* "
+            "them, but it **does** see plaintext centroid vectors.\n\n"
+            "In a production deployment this comparison would happen via "
+            "**homomorphic encryption** (e.g. CKKS / TenSEAL) or **secure "
+            "multi-party computation** so the relay never sees plaintext.\n\n"
+            "Additionally, **differential privacy noise** (ε-DP) is applied to "
+            "every centroid before export, making individual-face recovery "
+            "statistically impractical even if an adversary intercepts the data."
+        )
+
     SYNC_URL = f"http://{SYNC_SERVER_HOST}:{SYNC_SERVER_PORT}"
     DEVICE_ID = st.text_input(
         "Device ID", value=f"device_{os.getpid()}",
@@ -347,12 +362,16 @@ with tab3:
     curr_paths = st.session_state['paths']
     curr_index = st.session_state['index']
 
-    # ── Step 1: Centroid summary ──────────────────────────────────────────
+    # ── Step 1: Centroid summary (cached to avoid FAISS reconstruct on every rerun)
     st.markdown("---")
     st.markdown("#### 1 · Centroid Summary")
 
     if curr_index is not None and curr:
-        centroids = compute_centroids(curr, curr_paths, curr_index)
+        # Cache centroids in session_state; recompute only when cluster count changes
+        cache_key = f"_cached_centroids_{len(curr)}_{sum(len(v) for v in curr.values())}"
+        if cache_key not in st.session_state:
+            st.session_state[cache_key] = compute_centroids(curr, curr_paths, curr_index)
+        centroids = st.session_state[cache_key]
         cluster_sizes = {k: len(v) for k, v in curr.items() if k != -1}
 
         summary_data = []
